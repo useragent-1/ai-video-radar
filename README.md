@@ -2,22 +2,33 @@
 
 聚合中文视频平台最新 AI 内容的自动化情报站。报纸编辑部风格界面，每小时自动更新。
 
-## 架构：双通道数据流
+## 架构：双通道 + 烘焙快照兜底
+
+站点由同一条流水线自维护（`.github/workflows/crawl.yml`，每小时 cron + 手动触发）：
 
 ```
-┌─ 慢通道 ──────────────────────────────────────┐
-│ GitHub Actions（每小时 cron）                   │
-│   └─ scripts/crawl.mjs → public/data/feed.json │
-│      └─ 提交回仓库，随下次部署发布                │
-└───────────────────────────────────────────────┘
-┌─ 快通道 ──────────────────────────────────────┐
-│ Cloudflare Worker（/api/feed + 30min cron）    │
-│   └─ 边缘实时抓取 → KV 缓存（15min TTL）         │
-│      └─ 失败时回退陈旧缓存，再失败回退静态快照      │
-└───────────────────────────────────────────────┘
+GitHub Actions（每小时）
+  ├─ crawl   → scripts/crawl.mjs → public/data/feed.json
+  ├─ build   → vite build（把最新快照烘焙进 dist/ 与 Worker）
+  ├─ deploy  → wrangler deploy（Worker + 静态资源 → Cloudflare）
+  └─ commit  → 把快照提交回仓库，保住「仓库即数据源」
 ```
 
-前端优先请求 `/api/feed`，失败自动回落 `/data/feed.json`。任一通道存活，站点就有内容。
+线上请求 `/api/feed` 时，Cloudflare Worker 的回退链保证「永远有内容」：
+
+```
+① 边缘实时抓取（buildFeed）→ 成功则写入 KV 缓存，直接返回
+② KV 缓存（15min TTL，30min cron 自刷新）→ 命中即返回
+③ 烘焙快照：构建期把 public/data/feed.json 编译进 Worker 本体
+   → 边缘实时抓取被风控（B 站对数据中心 IP 限流）时，零运行时依赖直接返回
+④ ASSETS 静态资源 dist/data/feed.json
+⑤ GitHub raw：仓库内最新快照（兜底中的兜底）
+```
+
+> 关键事实：B 站对 Cloudflare 数据中心 IP 有风控，边缘实时抓取长期零产出，
+> 因此**烘焙快照（③）是线上内容的主兜底**，④⑤ 为额外保险。任一档可用，站点就有内容。
+
+前端优先请求 `/api/feed`，失败自动回落 `/data/feed.json`。
 
 ## 数据源
 
@@ -48,7 +59,10 @@ pnpm deploy       # 抓取 + 构建 + wrangler deploy
 
 - **Cloudflare Workers**（静态资源 + `/api/feed` 边缘接口 + KV 缓存 + cron）
 - 需要绑定 KV namespace：`FEED_CACHE`
-- GitHub Actions 每小时抓取并提交快照
+- GitHub Actions 每小时自动 抓取 → 构建 → 部署 → 提交快照，无需人工介入
+- 部署所需密钥（Repository Secrets）：
+  - `CLOUDFLARE_API_TOKEN` —— 具备 Workers 编辑 / KV 写入权限
+  - `CLOUDFLARE_ACCOUNT_ID` —— 账户 ID
 
 ## 版权
 
