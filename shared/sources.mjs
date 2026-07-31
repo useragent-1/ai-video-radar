@@ -452,6 +452,38 @@ function diversify(list, { window = 6, maxPerWindow = 3 } = {}) {
 }
 
 /**
+ * 合并两份「已精炼」的结果集。
+ *
+ * 为什么需要它：B 站与 AcFun 对 Cloudflare 数据中心 IP 有风控，
+ * 边缘实时抓取长期只能拿到媒体源与爱奇艺（约 80 条），
+ * 而 GitHub Actions 从 runner 出口抓的快照有 300 条、含全部 B 站内容。
+ * 二选一会让用户在「新」和「全」之间损失一头，所以这里做并集：
+ *   primary   = 边缘实时结果（更新，优先保留其播放量等实时指标）
+ *   secondary = 构建期烘焙的快照（更全，补上被风控的平台）
+ * 两边的 score 由同一套公式在各自时刻算出，快照最长滞后一小时，
+ * 而时间衰减常数是 36 小时，量级差异可忽略，因此直接复用不重算。
+ */
+export function mergeFeeds(primary = [], secondary = [], { limit = 300 } = {}) {
+  const byId = new Map();
+  const byTitle = new Map();
+  const normalize = (t) => t.toLowerCase().replace(/[\s\p{P}]/gu, '').slice(0, 28);
+
+  for (const item of [...primary, ...secondary]) {
+    if (!item || !item.id || !item.title) continue;
+    if (byId.has(item.id)) continue;
+    const key = normalize(item.title);
+    if (key.length >= 10 && byTitle.has(key)) continue;
+    byId.set(item.id, item);
+    if (key.length >= 10) byTitle.set(key, item);
+  }
+
+  const ranked = [...byId.values()]
+    .sort((a, b) => (b.score || 0) - (a.score || 0))
+    .slice(0, limit);
+  return diversify(ranked);
+}
+
+/**
  * 去重 → 相关性过滤 → 噪音治理 → 打分排序 → 多样性重排。
  * 过滤统计会一并返回，方便在站点上透明展示「筛掉了什么」。
  */

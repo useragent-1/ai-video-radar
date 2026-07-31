@@ -52,6 +52,9 @@ export interface FeedMeta {
   newSinceLastRun?: number;
   cacheAge?: number;
   servedBy?: 'edge' | 'snapshot';
+  servedVia?: 'baked' | 'asset-fallback' | 'github-raw';
+  /** 两条通道各自的产出量，用于判断是哪一侧退化 */
+  channels?: { edge: number; snapshot: number; snapshotAt: string | null };
   sourceStats?: Record<string, number>;
   dropped?: Record<string, number>;
   topics: { id: string; label: string }[];

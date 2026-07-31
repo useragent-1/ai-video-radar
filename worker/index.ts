@@ -8,9 +8,9 @@
  */
 
 // @ts-expect-error —— 与 Node 抓取脚本共用同一份 .mjs 规则，避免两套逻辑漂移
-import { collectAll, refine } from '../shared/sources.mjs';
+import { collectAll, collectTrends, refine, mergeFeeds } from '../shared/sources.mjs';
 // @ts-expect-error 同上
-import { TOPICS } from '../shared/taxonomy.mjs';
+import { TOPICS, WALLED_PLATFORMS } from '../shared/taxonomy.mjs';
 // 构建期把最新快照烘焙进 Worker，保证边缘接口在「无缓存 + 上游被风控」时仍有兜底内容。
 // 每次 Actions 流水线（抓取→构建→部署）都会把它刷新为最新快照。
 // @ts-expect-error JSON 快照由 esbuild 直接注入
@@ -35,21 +35,44 @@ const json = (data: unknown, extra: HeadersInit = {}) =>
 
 interface Payload {
   meta: Record<string, unknown>;
+  trends?: unknown[];
   items: unknown[];
 }
 
+const snapshot = BAKED_SNAPSHOT as Payload;
+
+/**
+ * 边缘取数：实时抓取结果 ∪ 构建期快照。
+ *
+ * 实测边缘只能抓到媒体源与爱奇艺（B 站、AcFun 对 CF 出口 IP 有风控），
+ * 单靠实时会把首屏从 300 条打到 80 条、且丢掉全部视频平台内容；
+ * 单靠快照则损失这一小时内的新稿。所以两者取并集，实时结果排在前面参与去重。
+ */
 async function buildFeed(): Promise<Payload> {
   const started = Date.now();
-  const { items: raw, stats } = await collectAll({ quick: true });
-  const { list, dropped } = refine(raw, { limit: 220 });
+
+  const [collected, trends] = await Promise.all([
+    collectAll({ quick: true }).catch(() => ({ items: [], stats: {} })),
+    collectTrends().catch(() => []),
+  ]);
+
+  const { list: live, dropped } = refine(collected.items, { limit: 220 });
+  const snapshotItems = (snapshot?.items as any[]) ?? [];
+  const list = mergeFeeds(live, snapshotItems, { limit: 300 }) as any[];
 
   const dayAgo = Date.now() - 86_400_000;
   const byPlatform: Record<string, number> = {};
   const byTopic: Record<string, number> = {};
-  for (const it of list as any[]) {
+  const byKind: Record<string, number> = {};
+  for (const it of list) {
     byPlatform[it.platformName] = (byPlatform[it.platformName] || 0) + 1;
     byTopic[it.topic] = (byTopic[it.topic] || 0) + 1;
+    byKind[it.kind || 'video'] = (byKind[it.kind || 'video'] || 0) + 1;
   }
+
+  const trendList = (trends as unknown[]).length
+    ? (trends as unknown[])
+    : ((snapshot?.trends as unknown[]) ?? []);
 
   return {
     meta: {
@@ -57,17 +80,26 @@ async function buildFeed(): Promise<Payload> {
       durationMs: Date.now() - started,
       mode: 'edge',
       stale: false,
-      sourceStats: stats,
+      sourceStats: collected.stats,
       dropped,
       topics: TOPICS,
       summary: {
         total: list.length,
-        freshLast24h: (list as any[]).filter((i) => new Date(i.publishedAt).getTime() > dayAgo)
-          .length,
+        freshLast24h: list.filter((i) => new Date(i.publishedAt).getTime() > dayAgo).length,
         byPlatform,
         byTopic,
+        byKind,
       },
+      walled: WALLED_PLATFORMS,
+      // 把两条通道各自的产出量如实标出来，方便判断是哪一侧出了问题
+      channels: {
+        edge: live.length,
+        snapshot: snapshotItems.length,
+        snapshotAt: (snapshot?.meta as any)?.generatedAt ?? null,
+      },
+      note: '边缘实时抓取与每小时快照的并集；B 站/AcFun 对云厂商 IP 有风控，其内容主要来自快照通道。',
     },
+    trends: trendList,
     items: list,
   };
 }
@@ -133,7 +165,7 @@ async function handleFeed(request: Request, env: Env, ctx: ExecutionContext): Pr
 
     // ① 烘焙快照：编译进 Worker，必定可用
     try {
-      const payload = BAKED_SNAPSHOT as Payload;
+      const payload = snapshot;
       if (payload?.items?.length) {
         return json(
           { ...payload, meta: { ...payload.meta, stale: false, servedVia: 'baked' } },
