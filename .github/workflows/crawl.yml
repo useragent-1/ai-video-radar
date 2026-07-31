@@ -1,0 +1,71 @@
+name: AI 情报抓取
+
+on:
+  schedule:
+    - cron: '0 * * * *' # 每小时整点
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 抓取模式
+        required: false
+        default: full
+        type: choice
+        options: [full, quick]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: crawl
+  cancel-in-progress: false
+
+jobs:
+  crawl:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: 执行抓取
+        run: |
+          if [ "${{ github.event.inputs.mode }}" = "quick" ]; then
+            pnpm crawl:quick
+          else
+            pnpm crawl
+          fi
+
+      - name: 验证产出不为空
+        run: |
+          node -e "
+            const d = require('./public/data/feed.json');
+            if (!d.items || d.items.length < 10) {
+              console.error('产出条目过少:', d.items?.length ?? 0);
+              process.exit(1);
+            }
+            console.log('OK:', d.items.length, '条,', d.meta.summary.freshLast24h, '条24h内');
+          "
+
+      - name: 提交快照
+        run: |
+          git config user.name 'ai-radar-bot'
+          git config user.email 'bot@users.noreply.github.com'
+          git add public/data/feed.json
+          if git diff --cached --quiet; then
+            echo '快照无变化，跳过提交'
+            exit 0
+          fi
+          STATS=$(node -e "const d=require('./public/data/feed.json');process.stdout.write(d.items.length+'条/'+d.meta.summary.freshLast24h+'条24h内')")
+          git commit -m "chore(crawl): $(date -u +%Y-%m-%dT%H:%MZ) — ${STATS}"
+          git pull --rebase origin main
+          git push

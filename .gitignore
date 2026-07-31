@@ -1,0 +1,7 @@
+node_modules/
+dist/
+*.local
+.env
+.wrangler/
+.dev.vars
+tsconfig.tsbuildinfo
