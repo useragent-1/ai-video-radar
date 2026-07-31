@@ -7,8 +7,8 @@
 import { writeFile, mkdir, readFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { collectAll, refine } from '../shared/sources.mjs';
-import { TOPICS } from '../shared/taxonomy.mjs';
+import { collectAll, collectTrends, refine } from '../shared/sources.mjs';
+import { TOPICS, WALLED_PLATFORMS } from '../shared/taxonomy.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const OUT = resolve(__dirname, '../public/data/feed.json');
@@ -26,9 +26,11 @@ async function readPrevious() {
 function summarize(items) {
   const byPlatform = {};
   const byTopic = {};
+  const byKind = { video: 0, article: 0 };
   for (const it of items) {
     byPlatform[it.platformName] = (byPlatform[it.platformName] || 0) + 1;
     byTopic[it.topic] = (byTopic[it.topic] || 0) + 1;
+    byKind[it.kind === 'article' ? 'article' : 'video'] += 1;
   }
   const dayAgo = Date.now() - 86400_000;
   return {
@@ -36,6 +38,7 @@ function summarize(items) {
     freshLast24h: items.filter((i) => new Date(i.publishedAt).getTime() > dayAgo).length,
     byPlatform,
     byTopic,
+    byKind,
   };
 }
 
@@ -43,8 +46,13 @@ async function main() {
   const started = Date.now();
   console.log(`[crawl] 启动${quick ? '（quick 模式）' : ''} — ${new Date().toISOString()}`);
 
-  const { items: raw, stats } = await collectAll({ quick });
+  // 热搜与主 Feed 相互独立，并行抓，其中一路失败不影响另一路
+  const [{ items: raw, stats }, trends] = await Promise.all([
+    collectAll({ quick }),
+    collectTrends().catch(() => []),
+  ]);
   console.log('[crawl] 各入口原始产出:', stats, `合计 ${raw.length}`);
+  console.log(`[crawl] 热搜风向 ${trends.length} 条`);
 
   const { list: items, dropped } = refine(raw);
   console.log(`[crawl] 保留 ${items.length} 条；过滤明细:`, dropped);
@@ -77,8 +85,10 @@ async function main() {
       dropped,
       topics: TOPICS,
       summary: summarize(items),
-      note: '抖音 / 快手 / 西瓜 / 腾讯视频 / 爱奇艺 的开放接口需要私有签名或登录态，暂无法稳定接入。',
+      walled: WALLED_PLATFORMS,
+      note: '抖音 / 快手 / 西瓜 / 腾讯视频 / 优酷 的开放接口需要私有签名或人机验证，无法稳定接入，已在页面标注直达入口。',
     },
+    trends,
     items,
   };
 

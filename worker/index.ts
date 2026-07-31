@@ -11,6 +11,10 @@
 import { collectAll, refine } from '../shared/sources.mjs';
 // @ts-expect-error 同上
 import { TOPICS } from '../shared/taxonomy.mjs';
+// 构建期把最新快照烘焙进 Worker，保证边缘接口在「无缓存 + 上游被风控」时仍有兜底内容。
+// 每次 Actions 流水线（抓取→构建→部署）都会把它刷新为最新快照。
+// @ts-expect-error JSON 快照由 esbuild 直接注入
+import BAKED_SNAPSHOT from '../public/data/feed.json';
 
 interface Env {
   ASSETS: Fetcher;
@@ -118,6 +122,56 @@ async function handleFeed(request: Request, env: Env, ctx: ExecutionContext): Pr
         { 'X-Cache': 'STALE' },
       );
     }
+
+    // 连缓存都没有（如刚部署）：逐级回退，保证 /api/feed 永远有内容。
+    // B 站对 Cloudflare 数据中心 IP 有风控，边缘实时抓取可能长期零产出。
+    // 回退顺序：① 构建期烘焙进 Worker 的快照（最稳，无运行时依赖）
+    //           ② 构建产物 dist/data/feed.json（ASSETS）
+    //           ③ 仓库内最新快照（GitHub raw）
+    const GITHUB_RAW =
+      'https://raw.githubusercontent.com/useragent-1/ai-video-radar/main/public/data/feed.json';
+
+    // ① 烘焙快照：编译进 Worker，必定可用
+    try {
+      const payload = BAKED_SNAPSHOT as Payload;
+      if (payload?.items?.length) {
+        return json(
+          { ...payload, meta: { ...payload.meta, stale: false, servedVia: 'baked' } },
+          { 'Cache-Control': 'public, max-age=300', 'X-Cache': 'BAKED' },
+        );
+      }
+    } catch {
+      /* 理论不可达 */
+    }
+
+    // ② 构建产物（ASSETS）
+    try {
+      const snapshot = await env.ASSETS.fetch(new Request(new URL('/data/feed.json', request.url)));
+      if (snapshot.ok) {
+        const payload = (await snapshot.json()) as Payload;
+        return json(
+          { ...payload, meta: { ...payload.meta, stale: false, servedVia: 'asset-fallback' } },
+          { 'Cache-Control': 'public, max-age=300', 'X-Cache': 'ASSET-FALLBACK' },
+        );
+      }
+    } catch {
+      /* 继续下一档 */
+    }
+
+    // ③ 仓库内最新快照
+    try {
+      const res = await fetch(GITHUB_RAW, { headers: { 'User-Agent': 'ai-video-radar/1.0' } });
+      if (res.ok) {
+        const payload = (await res.json()) as Payload;
+        return json(
+          { ...payload, meta: { ...payload.meta, stale: false, servedVia: 'github-raw' } },
+          { 'Cache-Control': 'public, max-age=300', 'X-Cache': 'GITHUB-RAW' },
+        );
+      }
+    } catch {
+      /* 全部失败才报错 */
+    }
+
     return json(
       { error: '实时抓取失败', detail: (err as Error).message },
       { 'X-Cache': 'MISS' },

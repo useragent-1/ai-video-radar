@@ -74,6 +74,12 @@ const HARD_NOISE = compile([
   '会员开通', '开通教程', '开通会员', '充值教程', '代充', '境外卡', '虚拟卡',
   '订阅教程', '无脑入手', '免费教程', '注册教程', '国内使用教程', '平替网站',
   '国内直连', '免费用上', '免费白嫖', '解锁会员', '国内如何使用',
+  // 盗版网课引流：爱奇艺「教育」频道下最大的污染源，标题多形如
+  // 「（搜XX it）AI大模型应用专家实战训练营-18期」
+  '实战训练营', '全栈工程师第', '训练营-', '期-完整版', '完整版无密',
+  '网盘自取', '课程分享', '资料自取', '视频教程全集', '培训班',
+  // 这类标题会把联系方式伪装成搜索词塞进括号：「（搜闪 学it）迪哥全套...」
+  '（搜', '(搜', '全套教程', '全套课程', '迪哥', '完整无密',
 ]);
 
 /** 软噪音：不剔除但降权，多为重复刷屏的资源分发内容 */
@@ -113,9 +119,16 @@ export function isPolitical(...parts) {
 
 /**
  * 相关性评估。
+ *
+ * 分区白名单是为 B 站设计的，直接套到别的平台会误伤：爱奇艺的频道叫
+ * 「科技,30」「资讯,25」，AcFun 压根不返回分区。早期版本对这两家一律
+ * 判 casual/unknown，导致 AcFun 抓 240 条只入选 2 条。
+ * 现在允许源适配器通过 tierHint 自己声明可信度，B 站之外不再套用它的分区表。
+ *
+ * @param {{title?:string, description?:string, channel?:string, tierHint?:string}} item
  * @returns {{score:number, strong:boolean, tier:string}} score >= 1.5 视为可收录
  */
-export function aiRelevance({ title = '', description = '', channel = '' } = {}) {
+export function aiRelevance({ title = '', description = '', channel = '', tierHint = '' } = {}) {
   const t = norm([title]);
   const d = norm([description]);
 
@@ -123,13 +136,15 @@ export function aiRelevance({ title = '', description = '', channel = '' } = {})
   const titleWeak = WEAK.test(t);
   const descStrong = STRONG.test(d);
 
-  const tier = CORE_CHANNELS.has(channel)
-    ? 'core'
-    : NEUTRAL_CHANNELS.has(channel)
-      ? 'neutral'
-      : channel
-        ? 'casual'
-        : 'unknown';
+  const tier =
+    tierHint ||
+    (CORE_CHANNELS.has(channel)
+      ? 'core'
+      : NEUTRAL_CHANNELS.has(channel)
+        ? 'neutral'
+        : channel
+          ? 'casual'
+          : 'unknown');
 
   let score = 0;
   if (titleStrong) score = 2;
@@ -139,8 +154,9 @@ export function aiRelevance({ title = '', description = '', channel = '' } = {})
   if (tier === 'neutral') score = titleStrong ? 1.7 : 0.6;
   // 娱乐分区无论标题多硬都不收 —— 它们是「用 AI 做梗」，不是「关于 AI 的消息」
   if (tier === 'casual') score = 0;
-  // 分区信息缺失（如 AcFun）时按内容强度保守判定
-  if (tier === 'unknown' && !titleStrong) score = Math.min(score, 1.4);
+  // 分区信息缺失（如 AcFun）：标题弱信号也放行，靠噪音词表与热度排序兜底，
+  // 否则整个平台等于没接。
+  if (tier === 'unknown' && !titleStrong && !titleWeak) score = Math.min(score, 1.1);
 
   return { score, strong: titleStrong, tier };
 }
@@ -237,3 +253,52 @@ export function classifyTopic(...parts) {
 }
 
 export const TOPICS = TOPIC_RULES.map(({ id, label }) => ({ id, label }));
+
+/* ------------------------------- 爱奇艺频道白名单 ------------------------------- */
+
+/**
+ * 爱奇艺搜索结果的频道字段形如「科技,30」「教育,12」。
+ * 实测「教育」频道 90% 是盗版网课引流，「短剧/少儿/生活」全是蹭 AI 标签的水视频，
+ * 真正有情报价值的只有科技与资讯两个频道，因此在源头就做白名单，
+ * 而不是指望后面的噪音词表把它们一条条捞出来。
+ */
+export const IQIYI_CHANNELS = new Set(['科技', '资讯']);
+
+export function iqiyiChannelName(raw = '') {
+  return String(raw).split(',')[0].trim();
+}
+
+/* --------------------------------- 资讯媒体源 --------------------------------- */
+
+/**
+ * AI 与科技媒体 RSS。视频平台能给「大家在看什么」，媒体源给「到底发生了什么」，
+ * 两者互补 —— 只有视频的话，重大发布往往要滞后半天才有 UP 主跟进。
+ */
+export const MEDIA_FEEDS = [
+  { id: 'qbitai', name: '量子位', url: 'https://www.qbitai.com/feed', weight: 1.25 },
+  { id: 'leiphone', name: '雷峰网', url: 'https://www.leiphone.com/feed', weight: 1.1 },
+  { id: 'ithome', name: 'IT之家', url: 'https://www.ithome.com/rss/', weight: 1.0 },
+  { id: 'ifanr', name: '爱范儿', url: 'https://www.ifanr.com/feed', weight: 1.0 },
+  { id: 'tmtpost', name: '钛媒体', url: 'https://www.tmtpost.com/feed', weight: 0.95 },
+  { id: 'sspai', name: '少数派', url: 'https://sspai.com/feed', weight: 0.9 },
+  // 新浪科技 rollnews.xml 已停更（实测仍返回 2018 年条目），不要再加回来
+];
+
+/* ------------------------------ 有反爬墙的平台 ------------------------------ */
+
+/**
+ * 这些平台的公开接口都需要私有签名或人机验证，无凭证环境下拿不到数据：
+ *   抖音 / 西瓜  → a_bogus 签名 + JS 挑战
+ *   快手        → graphql 返回 400002，要求滑块验证
+ *   腾讯视频     → 搜索接口返回 ret 10401，缺少签名参数
+ *   优酷 / 搜狐 / 好看 → 直接判爬虫
+ * 与其假装覆盖，不如老实告诉用户抓不到，并给一个站内 AI 搜索直达入口。
+ */
+export const WALLED_PLATFORMS = [
+  { id: 'douyin', name: '抖音', reason: 'a_bogus 签名 + JS 挑战', search: 'https://www.douyin.com/search/人工智能' },
+  { id: 'kuaishou', name: '快手', reason: '滑块人机验证', search: 'https://www.kuaishou.com/search/video?searchKey=人工智能' },
+  { id: 'tencent', name: '腾讯视频', reason: '搜索接口需签名', search: 'https://v.qq.com/x/search/?q=人工智能' },
+  { id: 'xigua', name: '西瓜视频', reason: 'a_bogus 签名', search: 'https://www.ixigua.com/search/人工智能/' },
+  { id: 'youku', name: '优酷', reason: '接口判爬虫', search: 'https://so.youku.com/search_video/q_人工智能' },
+  { id: 'douban', name: '好看视频', reason: '接口判爬虫', search: 'https://haokan.baidu.com/web/search/page?query=人工智能' },
+];

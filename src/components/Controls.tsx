@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import type { SortMode, WindowMode } from '../types';
+import type { KindFilter, SortMode, WindowMode } from '../types';
 
 interface Props {
   query: string;
@@ -7,6 +7,11 @@ interface Props {
   topics: { id: string; label: string; count: number }[];
   activeTopic: string;
   onTopic: (id: string) => void;
+  platforms: { id: string; label: string; count: number }[];
+  activePlatform: string;
+  onPlatform: (id: string) => void;
+  kind: KindFilter;
+  onKind: (v: KindFilter) => void;
   sort: SortMode;
   onSort: (v: SortMode) => void;
   timeWindow: WindowMode;
@@ -16,6 +21,12 @@ interface Props {
   onRefresh: () => void;
   refreshing: boolean;
 }
+
+const KINDS: { id: KindFilter; label: string }[] = [
+  { id: 'all', label: '全部' },
+  { id: 'video', label: '视频' },
+  { id: 'article', label: '资讯' },
+];
 
 const SORTS: { id: SortMode; label: string }[] = [
   { id: 'smart', label: '综合' },
@@ -68,6 +79,14 @@ export function Controls(p: Props) {
         {!p.query && <kbd>/</kbd>}
       </label>
 
+      <div className="seg" role="group" aria-label="内容类型">
+        {KINDS.map((k) => (
+          <button key={k.id} aria-pressed={p.kind === k.id} onClick={() => p.onKind(k.id)}>
+            {k.label}
+          </button>
+        ))}
+      </div>
+
       <div className="seg" role="group" aria-label="排序方式">
         {SORTS.map((s) => (
           <button key={s.id} aria-pressed={p.sort === s.id} onClick={() => p.onSort(s.id)}>
@@ -117,7 +136,7 @@ export function Controls(p: Props) {
 
       <div className="chips" role="group" aria-label="主题筛选">
         <button className="chip" aria-pressed={p.activeTopic === 'all'} onClick={() => p.onTopic('all')}>
-          全部
+          全部主题
         </button>
         {p.topics.map((t) => (
           <button
@@ -128,6 +147,27 @@ export function Controls(p: Props) {
           >
             {t.label}
             <span className="chip__count">{t.count}</span>
+          </button>
+        ))}
+      </div>
+
+      <div className="chips chips--platform" role="group" aria-label="信源筛选">
+        <button
+          className="chip"
+          aria-pressed={p.activePlatform === 'all'}
+          onClick={() => p.onPlatform('all')}
+        >
+          全部信源
+        </button>
+        {p.platforms.map((s) => (
+          <button
+            key={s.id}
+            className="chip"
+            aria-pressed={p.activePlatform === s.id}
+            onClick={() => p.onPlatform(s.id)}
+          >
+            {s.label}
+            <span className="chip__count">{s.count}</span>
           </button>
         ))}
       </div>

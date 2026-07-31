@@ -403,14 +403,14 @@
     filter: saturate(0.92) contrast(1.03);
   }
 
-  .lede__figure img {
+  .lede__img {
     width: 100%;
     height: 100%;
     object-fit: cover;
     transition: transform 600ms var(--ease-quart);
   }
 
-  .lede__item:hover .lede__figure img {
+  .lede__item:hover .lede__img {
     transform: scale(1.035);
   }
 
@@ -769,5 +769,250 @@
     .entry {
       grid-template-columns: clamp(5rem, 26vw, 7rem) 1fr;
     }
+  }
+}
+
+/* =============================================================================
+   v0.3 新增：无图兜底 / 热搜风向 / 覆盖度面板
+   ============================================================================= */
+
+@layer components {
+  /* ---------------- 缩略图兜底 ----------------
+     媒体 RSS 大多不带图。与其留一个灰块或破图，不如把信源名排进去，
+     既填了版面又多给一条信息。 */
+  .thumb--fallback {
+    display: grid;
+    place-items: center;
+    background:
+      repeating-linear-gradient(
+        135deg,
+        transparent,
+        transparent 5px,
+        color-mix(in oklch, var(--ink) 4%, transparent) 5px,
+        color-mix(in oklch, var(--ink) 4%, transparent) 6px
+      ),
+      var(--paper-sunk);
+    border: 1px solid var(--rule);
+  }
+
+  .thumb--fallback span {
+    font-family: var(--font-display);
+    font-size: clamp(0.7rem, 2.2vw, 0.95rem);
+    letter-spacing: 0.06em;
+    color: var(--ink-faint);
+    writing-mode: vertical-rl;
+    text-orientation: upright;
+  }
+
+  .lede__img.thumb--fallback {
+    width: 100%;
+    height: 100%;
+  }
+  .lede__img.thumb--fallback span {
+    font-size: clamp(1rem, 3vw, 1.6rem);
+  }
+
+  /* 资讯类信源标签换个色，与视频平台区分开 */
+  .tag--platform[data-kind='article'] {
+    border-color: color-mix(in oklch, var(--seal) 45%, transparent);
+    color: var(--seal);
+  }
+
+  /* ---------------- 热搜风向条 ----------------
+     横向滚动的电报带，视觉上像一条新闻滚动条。 */
+  .trends {
+    display: flex;
+    align-items: center;
+    gap: 0.7rem;
+    max-width: var(--measure);
+    margin-inline: auto;
+    padding: 0.5rem var(--gutter);
+    border-block: 1px solid var(--rule);
+    background: color-mix(in oklch, var(--signal) 3.5%, var(--paper));
+  }
+
+  .trends__label {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    flex-shrink: 0;
+    font-family: var(--font-display);
+    font-size: var(--step--1);
+    letter-spacing: 0.16em;
+    color: var(--signal);
+  }
+
+  .trends__pulse {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--signal);
+    animation: trend-pulse 2.4s var(--ease) infinite;
+  }
+
+  @keyframes trend-pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.35; transform: scale(0.75); }
+  }
+
+  .trends__track {
+    display: flex;
+    gap: 0.45rem;
+    overflow-x: auto;
+    scrollbar-width: none;
+    padding-block: 0.1rem;
+  }
+  .trends__track::-webkit-scrollbar {
+    display: none;
+  }
+
+  .trends__item {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    white-space: nowrap;
+    font-size: var(--step--1);
+    color: var(--ink-soft);
+    padding: 0.15rem 0.5rem;
+    border: 1px solid var(--rule);
+    transition: all var(--dur) var(--ease);
+  }
+
+  .trends__item:hover {
+    color: var(--signal);
+    border-color: color-mix(in oklch, var(--signal) 50%, transparent);
+    background: var(--signal-soft);
+  }
+
+  .trends__src {
+    font-size: 0.65rem;
+    letter-spacing: 0.04em;
+    color: var(--ink-faint);
+    padding-right: 0.35rem;
+    border-right: 1px solid var(--rule);
+  }
+
+  /* ---------------- 覆盖度面板 ----------------
+     默认折叠。展开后左边是真在抓的源，右边是抓不到的平台及原因。 */
+  .coverage {
+    max-width: var(--measure);
+    margin-inline: auto;
+    padding-inline: var(--gutter);
+    margin-block: 2rem 0;
+  }
+
+  .coverage__toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    padding: 0.6rem 0.8rem;
+    font-size: var(--step--1);
+    color: var(--ink-soft);
+    border: 1px solid var(--rule);
+    background: var(--paper-raised);
+    transition: border-color var(--dur) var(--ease);
+  }
+
+  .coverage__toggle:hover {
+    border-color: var(--rule-strong);
+  }
+
+  .coverage__caret {
+    transition: transform var(--dur) var(--ease);
+    font-size: 1.1rem;
+    line-height: 1;
+  }
+  .coverage__caret[data-open='true'] {
+    transform: rotate(90deg);
+  }
+
+  .coverage__panel {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
+    gap: 1.5rem;
+    padding: 1rem 0.8rem 1.2rem;
+    border: 1px solid var(--rule);
+    border-top: none;
+    background: var(--paper-raised);
+    animation: coverage-in 260ms var(--ease);
+  }
+
+  @keyframes coverage-in {
+    from { opacity: 0; transform: translateY(-4px); }
+    to { opacity: 1; transform: none; }
+  }
+
+  .coverage__col h4 {
+    font-family: var(--font-display);
+    font-size: var(--step--1);
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    color: var(--ink-faint);
+    padding-bottom: 0.4rem;
+    margin-bottom: 0.5rem;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .coverage__list {
+    display: grid;
+    gap: 0.35rem;
+    font-size: var(--step--1);
+  }
+
+  .coverage__list li {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    color: var(--ink-soft);
+  }
+
+  .coverage__list a:hover {
+    color: var(--signal);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+
+  .coverage__list .num {
+    margin-left: auto;
+    color: var(--ink-faint);
+  }
+
+  .coverage__dot {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    background: var(--ink-faint);
+    opacity: 0.4;
+  }
+
+  .coverage__dot--on {
+    background: var(--signal);
+    opacity: 1;
+  }
+
+  .coverage__reason {
+    margin-left: auto;
+    font-size: 0.68rem;
+    color: var(--ink-faint);
+  }
+
+  /* 信源筛选行比主题行更次要，视觉上压一档 */
+  .chips--platform .chip {
+    font-size: 0.72rem;
+    opacity: 0.88;
+  }
+  .chips--platform .chip[aria-pressed='true'] {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .trends__pulse {
+    animation: none;
+  }
+  .coverage__panel {
+    animation: none;
   }
 }

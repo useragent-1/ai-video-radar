@@ -1,5 +1,10 @@
-name: AI 情报抓取
+name: AI 情报台 · 抓取 + 部署
 
+# 自维护流水线：
+#   1. 抓取 B站 / AcFun 最新 AI 内容 → public/data/feed.json（慢通道，仓库内含快照）
+#   2. 构建前端（把最新快照烘焙进 dist/data/feed.json，Worker 边缘抓取失败时的兜底）
+#   3. 部署到 Cloudflare（Worker + 静态资源）
+#   4. 提交快照回仓库，保住「仓库即数据源」的属性
 on:
   schedule:
     - cron: '0 * * * *' # 每小时整点
@@ -16,15 +21,17 @@ permissions:
   contents: write
 
 concurrency:
-  group: crawl
+  group: crawl-deploy
   cancel-in-progress: false
 
 jobs:
-  crawl:
+  pipeline:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
 
       - uses: pnpm/action-setup@v4
         with:
@@ -35,14 +42,15 @@ jobs:
           node-version: '22'
           cache: pnpm
 
-      - run: pnpm install --frozen-lockfile
+      - name: 安装依赖
+        run: pnpm install --frozen-lockfile
 
-      - name: 执行抓取
+      - name: 抓取最新情报
         run: |
           if [ "${{ github.event.inputs.mode }}" = "quick" ]; then
-            pnpm crawl:quick
+            node scripts/crawl.mjs --quick
           else
-            pnpm crawl
+            node scripts/crawl.mjs
           fi
 
       - name: 验证产出不为空
@@ -55,6 +63,15 @@ jobs:
             }
             console.log('OK:', d.items.length, '条,', d.meta.summary.freshLast24h, '条24h内');
           "
+
+      - name: 构建前端
+        run: pnpm build
+
+      - name: 部署到 Cloudflare
+        run: npx wrangler deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
       - name: 提交快照
         run: |

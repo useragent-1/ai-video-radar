@@ -7,8 +7,8 @@ const UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) ' +
   'Chrome/126.0.0.0 Safari/537.36';
 
-/** 带超时与一次重试的 JSON 请求。上游偶发抖动是常态，不重试就是给自己找茬。 */
-export async function fetchJson(url, { headers = {}, timeoutMs = 12_000, retries = 1 } = {}) {
+/** 带超时与一次重试的文本请求。返回 null 表示彻底失败。 */
+export async function fetchText(url, { headers = {}, timeoutMs = 12_000, retries = 1 } = {}) {
   let lastErr;
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
@@ -18,8 +18,7 @@ export async function fetchJson(url, { headers = {}, timeoutMs = 12_000, retries
         redirect: 'follow',
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const text = await res.text();
-      return JSON.parse(text);
+      return await res.text();
     } catch (err) {
       lastErr = err;
       if (attempt < retries) await new Promise((r) => setTimeout(r, 400 + attempt * 600));
@@ -27,6 +26,18 @@ export async function fetchJson(url, { headers = {}, timeoutMs = 12_000, retries
   }
   console.error(`[http] 请求失败 ${url.slice(0, 90)}: ${lastErr?.message}`);
   return null;
+}
+
+/** 带超时与一次重试的 JSON 请求。上游偶发抖动是常态，不重试就是给自己找茬。 */
+export async function fetchJson(url, opts = {}) {
+  const text = await fetchText(url, opts);
+  if (text === null) return null;
+  try {
+    return JSON.parse(text);
+  } catch (err) {
+    console.error(`[http] JSON 解析失败 ${url.slice(0, 90)}: ${err.message}`);
+    return null;
+  }
 }
 
 /**

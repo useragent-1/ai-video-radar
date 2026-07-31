@@ -4,9 +4,11 @@ import { Masthead } from './components/Masthead';
 import { Controls } from './components/Controls';
 import { Lede } from './components/Lede';
 import { Entry } from './components/Entry';
+import { Trends } from './components/Trends';
+import { Coverage } from './components/Coverage';
 import { Empty, ErrorState, Skeleton } from './components/States';
 import { dayLabel } from './lib/format';
-import type { SortMode, VideoItem, WindowMode } from './types';
+import type { KindFilter, SortMode, VideoItem, WindowMode } from './types';
 
 const PAGE = 40;
 const WINDOW_MS: Record<WindowMode, number> = {
@@ -47,13 +49,18 @@ export default function App() {
 
   const [query, setQuery] = useState('');
   const [topic, setTopic] = useState('all');
+  const [platform, setPlatform] = useState('all');
+  const [kind, setKind] = useState<KindFilter>('all');
   const [sort, setSort] = useState<SortMode>('smart');
   const [timeWindow, setTimeWindow] = useState<WindowMode>('all');
   const [page, setPage] = useState(1);
 
   const debouncedQuery = useDebounced(query);
 
-  useEffect(() => setPage(1), [debouncedQuery, topic, sort, timeWindow]);
+  useEffect(
+    () => setPage(1),
+    [debouncedQuery, topic, platform, kind, sort, timeWindow],
+  );
 
   const items = feed?.items ?? [];
 
@@ -69,17 +76,32 @@ export default function App() {
       .sort((a, b) => b.count - a.count);
   }, [items]);
 
+  const platforms = useMemo(() => {
+    const counts = new Map<string, { label: string; count: number }>();
+    for (const it of items) {
+      const cur = counts.get(it.platform);
+      if (cur) cur.count += 1;
+      else counts.set(it.platform, { label: it.platformName, count: 1 });
+    }
+    return [...counts.entries()]
+      .map(([id, v]) => ({ id, ...v }))
+      .sort((a, b) => b.count - a.count);
+  }, [items]);
+
   const filtered = useMemo(() => {
     const q = debouncedQuery.trim().toLowerCase();
     const cutoff = Date.now() - WINDOW_MS[timeWindow];
 
     const list = items.filter((it) => {
       if (topic !== 'all' && it.topic !== topic) return false;
+      if (platform !== 'all' && it.platform !== platform) return false;
+      if (kind !== 'all' && it.kind !== kind) return false;
       if (new Date(it.publishedAt).getTime() < cutoff) return false;
       if (!q) return true;
       return (
         it.title.toLowerCase().includes(q) ||
         it.author.toLowerCase().includes(q) ||
+        it.platformName.toLowerCase().includes(q) ||
         it.topicLabel.toLowerCase().includes(q) ||
         it.description.toLowerCase().includes(q)
       );
@@ -88,12 +110,19 @@ export default function App() {
     const sorters: Record<SortMode, (a: VideoItem, b: VideoItem) => number> = {
       smart: (a, b) => b.score - a.score,
       latest: (a, b) => b.publishedTs - a.publishedTs,
+      // 文章没有播放量，按最热排时让它们退到视频之后，而不是混在中间显示 0
       hot: (a, b) => b.views - a.views,
     };
     return [...list].sort(sorters[sort]);
-  }, [items, debouncedQuery, topic, sort, timeWindow]);
+  }, [items, debouncedQuery, topic, platform, kind, sort, timeWindow]);
 
-  const noFilters = !debouncedQuery && topic === 'all' && timeWindow === 'all' && sort === 'smart';
+  const noFilters =
+    !debouncedQuery &&
+    topic === 'all' &&
+    platform === 'all' &&
+    kind === 'all' &&
+    timeWindow === 'all' &&
+    sort === 'smart';
   const lede = noFilters ? filtered.slice(0, 4) : [];
   const rest = filtered.slice(lede.length);
   const paged = rest.slice(0, page * PAGE);
@@ -113,6 +142,8 @@ export default function App() {
   const resetAll = () => {
     setQuery('');
     setTopic('all');
+    setPlatform('all');
+    setKind('all');
     setSort('smart');
     setTimeWindow('all');
   };
@@ -121,12 +152,19 @@ export default function App() {
     <div className="shell">
       <Masthead meta={feed?.meta ?? null} visible={filtered.length} />
 
+      <Trends trends={feed?.trends ?? []} />
+
       <Controls
         query={query}
         onQuery={setQuery}
         topics={topics}
         activeTopic={topic}
         onTopic={setTopic}
+        platforms={platforms}
+        activePlatform={platform}
+        onPlatform={setPlatform}
+        kind={kind}
+        onKind={setKind}
         sort={sort}
         onSort={setSort}
         timeWindow={timeWindow}
@@ -181,15 +219,20 @@ export default function App() {
         )}
       </main>
 
+      <Coverage meta={feed?.meta ?? null} />
+
       <footer className="colophon">
         <p>
           <strong>数据说明。</strong>
-          内容来自哔哩哔哩（搜索、分区最新投稿、排行榜三个维度）与 AcFun 的公开接口，
-          每小时自动抓取一次，页面上的「重新抓取」会触发边缘实时拉取。
+          视频来自哔哩哔哩（搜索 + 分区最新投稿）、AcFun、爱奇艺（科技与资讯频道）的公开接口；
+          资讯来自量子位、雷峰网、IT 之家、爱范儿、钛媒体、少数派的公开订阅源；
+          风向条取自哔哩哔哩与微博热搜中的 AI 相关词条。每小时自动抓取一次，
+          页面上的「重新抓取」会触发边缘实时拉取。
         </p>
         <p>
-          抖音、快手、西瓜视频、腾讯视频、爱奇艺的开放接口需要私有签名或登录态，
-          目前无法在无凭证环境下稳定接入 —— 与其伪装覆盖，不如如实标注。
+          抖音与西瓜视频需要 a_bogus 签名，快手要过滑块验证，腾讯视频搜索接口需签名，
+          优酷与好看视频直接判爬虫 —— 这些平台在无凭证环境下拿不到数据，
+          已在上方「覆盖」里如实列出并给了站内搜索直达入口。与其伪装覆盖，不如把话说清楚。
         </p>
         {feed?.meta.dropped && (
           <p>

@@ -1,18 +1,31 @@
 {
+  "$schema": "node_modules/wrangler/config-schema.json",
   "name": "ai-video-radar",
-  "main": "src/index.ts",
-  "compatibility_date": "2025-11-11",
+  "main": "worker/index.ts",
+  "account_id": "1623c59b55e2762b7190765e7cbbb5ee",
+  "compatibility_date": "2026-07-01",
+  "compatibility_flags": ["nodejs_compat"],
+
   "assets": {
-    "directory": "./public/",
+    "directory": "./dist",
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
     "run_worker_first": ["/api/*"]
   },
-  "kv_namespaces": [
-    { "binding": "CACHE", "id": "ai_video_radar_cache" }
-  ],
+
+  "observability": {
+    "enabled": true
+  },
+
   "triggers": {
+    // 每 30 分钟刷新一次边缘缓存
     "crons": ["*/30 * * * *"]
   },
-  "observability": { "enabled": true }
+
+  "kv_namespaces": [
+    {
+      "binding": "FEED_CACHE",
+      "id": "0bff4abebb884faf94b56a05babe2598"
+    }
+  ]
 }
