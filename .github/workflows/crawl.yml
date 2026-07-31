@@ -8,6 +8,13 @@ name: AI 情报台 · 抓取 + 部署
 on:
   schedule:
     - cron: '0 * * * *' # 每小时整点
+  push:
+    branches: [main]
+    # 机器人每小时会把快照提交回 main，若不排除就会自己触发自己，无限套娃。
+    # 文档改动也不值得跑一次完整抓取+部署。
+    paths-ignore:
+      - 'public/data/feed.json'
+      - '**/*.md'
   workflow_dispatch:
     inputs:
       mode:
