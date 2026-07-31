@@ -86,6 +86,8 @@ async function buildFeed(): Promise<Payload> {
       summary: {
         total: list.length,
         freshLast24h: list.filter((i) => new Date(i.publishedAt).getTime() > dayAgo).length,
+        // 教程供给单独计数，便于发现搜索通道悄悄断掉（总量会被资讯自动填满，看不出来）
+        tutorials: list.filter((i) => i.isTutorial).length,
         byPlatform,
         byTopic,
         byKind,

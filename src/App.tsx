@@ -51,6 +51,7 @@ export default function App() {
   const [topic, setTopic] = useState('all');
   const [platform, setPlatform] = useState('all');
   const [kind, setKind] = useState<KindFilter>('all');
+  const [tutorialOnly, setTutorialOnly] = useState(false);
   const [sort, setSort] = useState<SortMode>('smart');
   const [timeWindow, setTimeWindow] = useState<WindowMode>('all');
   const [page, setPage] = useState(1);
@@ -59,7 +60,7 @@ export default function App() {
 
   useEffect(
     () => setPage(1),
-    [debouncedQuery, topic, platform, kind, sort, timeWindow],
+    [debouncedQuery, topic, platform, kind, tutorialOnly, sort, timeWindow],
   );
 
   const items = feed?.items ?? [];
@@ -96,6 +97,7 @@ export default function App() {
       if (topic !== 'all' && it.topic !== topic) return false;
       if (platform !== 'all' && it.platform !== platform) return false;
       if (kind !== 'all' && it.kind !== kind) return false;
+      if (tutorialOnly && !it.isTutorial) return false;
       if (new Date(it.publishedAt).getTime() < cutoff) return false;
       if (!q) return true;
       return (
@@ -114,13 +116,16 @@ export default function App() {
       hot: (a, b) => b.views - a.views,
     };
     return [...list].sort(sorters[sort]);
-  }, [items, debouncedQuery, topic, platform, kind, sort, timeWindow]);
+  }, [items, debouncedQuery, topic, platform, kind, tutorialOnly, sort, timeWindow]);
+
+  const tutorialCount = useMemo(() => items.filter((it) => it.isTutorial).length, [items]);
 
   const noFilters =
     !debouncedQuery &&
     topic === 'all' &&
     platform === 'all' &&
     kind === 'all' &&
+    !tutorialOnly &&
     timeWindow === 'all' &&
     sort === 'smart';
   const lede = noFilters ? filtered.slice(0, 4) : [];
@@ -144,6 +149,7 @@ export default function App() {
     setTopic('all');
     setPlatform('all');
     setKind('all');
+    setTutorialOnly(false);
     setSort('smart');
     setTimeWindow('all');
   };
@@ -165,6 +171,9 @@ export default function App() {
         onPlatform={setPlatform}
         kind={kind}
         onKind={setKind}
+        tutorialOnly={tutorialOnly}
+        onTutorialOnly={setTutorialOnly}
+        tutorialCount={tutorialCount}
         sort={sort}
         onSort={setSort}
         timeWindow={timeWindow}

@@ -341,6 +341,46 @@
     color: oklch(98% 0.01 85);
   }
 
+  /*
+    教程开关。它和 .seg 是不同性质的控件（横切筛选 vs 互斥单选），
+    所以视觉上刻意不做成分段器的一格：独立描边 + 选中时用 accent 而非 signal，
+    让人一眼看出「这个开关和旁边那排不是一回事」。
+  */
+  .toggle-tutorial {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.32rem;
+    white-space: nowrap;
+    font-size: var(--step--1);
+    padding: 0.32rem 0.62rem;
+    border: 1px solid var(--rule-strong);
+    color: var(--ink-soft);
+    transition: all 160ms var(--ease);
+  }
+
+  .toggle-tutorial svg {
+    opacity: 0.55;
+    transition: opacity 160ms var(--ease);
+  }
+
+  .toggle-tutorial:hover {
+    color: var(--accent-ink);
+    border-color: color-mix(in oklch, var(--accent-ink) 45%, transparent);
+  }
+  .toggle-tutorial:hover svg {
+    opacity: 1;
+  }
+
+  .toggle-tutorial[aria-pressed='true'] {
+    background: var(--accent-ink);
+    border-color: var(--accent-ink);
+    color: oklch(98% 0.01 85);
+  }
+  .toggle-tutorial[aria-pressed='true'] svg,
+  .toggle-tutorial[aria-pressed='true'] .chip__count {
+    opacity: 1;
+  }
+
   .icon-btn {
     display: grid;
     place-items: center;
@@ -596,6 +636,17 @@
   .tag--platform {
     border-color: color-mix(in oklch, var(--accent-ink) 40%, transparent);
     color: var(--accent-ink);
+  }
+
+  /*
+    教程标记用实心底而非描边 —— 页面上描边标签已经有两种，
+    再加第三种描边就分不出层级了。实心块在灰度扫读时也能一眼抓住。
+  */
+  .tag--tutorial {
+    background: color-mix(in oklch, var(--signal) 12%, transparent);
+    border-color: color-mix(in oklch, var(--signal) 55%, transparent);
+    color: var(--signal);
+    font-weight: 500;
   }
 
   .dur {

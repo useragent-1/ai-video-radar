@@ -9,10 +9,11 @@
  * 抓不到的平台在 WALLED_PLATFORMS 里如实列出并给直达入口，不假装覆盖。
  */
 
-import { fetchJson, fetchText, getBiliCookie, biliHeaders, pooled } from './http.mjs';
+import { fetchJson, fetchText, getBiliCookie, biliHeaders, wbiSignedQuery, pooled } from './http.mjs';
 import { parseFeed } from './rss.mjs';
 import {
   SEARCH_KEYWORDS,
+  TUTORIAL_KEYWORDS,
   BILI_ZONES,
   MEDIA_FEEDS,
   IQIYI_CHANNELS,
@@ -23,6 +24,7 @@ import {
   isPolitical,
   isAiRelated,
   classifyTopic,
+  teachingIntent,
 } from './taxonomy.mjs';
 
 const stripTags = (s) => String(s || '').replace(/<[^>]+>/g, '').trim();
@@ -39,6 +41,9 @@ function makeItem(raw) {
   const title = stripTags(raw.title);
   const desc = stripTags(raw.description).slice(0, 200);
   const topic = classifyTopic(title, desc, raw.tags);
+  // 教程是横切属性而非主题分支：「ComfyUI 写真工作流」既属于 AIGC 也是教程。
+  // 用独立标志位承载，前端就能在任意主题下再切一刀「只看教程」。
+  const teach = teachingIntent(title, desc);
   return {
     id: `${raw.platform}:${raw.nativeId}`,
     platform: raw.platform,
@@ -60,6 +65,8 @@ function makeItem(raw) {
     description: desc,
     topic: topic.id,
     topicLabel: topic.label,
+    /** 是否为可动手复现的教学内容，与 topic 正交 */
+    isTutorial: teach.is,
     channel: raw.channel || '',
     /** 让适配器自己声明可信度，避免 B 站分区表被套用到别的平台上 */
     tierHint: raw.tierHint || '',
@@ -72,10 +79,30 @@ function makeItem(raw) {
 /* ---------------------------------- 哔哩哔哩 ---------------------------------- */
 
 async function biliSearch(keyword, cookie) {
-  const url =
-    'https://api.bilibili.com/x/web-interface/search/type?search_type=video&order=pubdate&page=1' +
-    `&keyword=${encodeURIComponent(keyword)}`;
-  const json = await fetchJson(url, { headers: biliHeaders(cookie) });
+  // B 站搜索接口已强制 WBI 签名（缺签直接 412）。优先带签名请求；
+  // 拿不到密钥 / 签名被风控时退化为无签名，保留历史可用的兜底路径。
+  let json = null;
+  try {
+    const qs = await wbiSignedQuery(
+      { search_type: 'video', order: 'pubdate', page: 1, keyword },
+      cookie,
+    );
+    if (qs) {
+      json = await fetchJson(
+        `https://api.bilibili.com/x/web-interface/search/type?${qs}`,
+        { headers: biliHeaders(cookie) },
+      );
+    }
+  } catch {
+    /* 签名失败，走下方兜底 */
+  }
+  if (!json || !Array.isArray(json?.data?.result)) {
+    json = await fetchJson(
+      'https://api.bilibili.com/x/web-interface/search/type?search_type=video&order=pubdate&page=1' +
+        `&keyword=${encodeURIComponent(keyword)}`,
+      { headers: biliHeaders(cookie) },
+    );
+  }
   const list = json?.data?.result;
   if (!Array.isArray(list)) return [];
 
@@ -104,8 +131,23 @@ async function biliSearch(keyword, cookie) {
 }
 
 async function biliZone(zone, cookie) {
-  const url = `https://api.bilibili.com/x/web-interface/newlist?rid=${zone.rid}&ps=50&pn=1`;
-  const json = await fetchJson(url, { headers: biliHeaders(cookie) });
+  let json = null;
+  try {
+    const qs = await wbiSignedQuery({ rid: zone.rid, ps: 50, pn: 1 }, cookie);
+    if (qs) {
+      json = await fetchJson(`https://api.bilibili.com/x/web-interface/newlist?${qs}`, {
+        headers: biliHeaders(cookie),
+      });
+    }
+  } catch {
+    /* 签名失败，走下方兜底 */
+  }
+  if (!json || !Array.isArray(json?.data?.archives)) {
+    json = await fetchJson(
+      `https://api.bilibili.com/x/web-interface/newlist?rid=${zone.rid}&ps=50&pn=1`,
+      { headers: biliHeaders(cookie) },
+    );
+  }
   const list = json?.data?.archives;
   if (!Array.isArray(list)) return [];
 
@@ -376,8 +418,16 @@ export async function collectAll(opts = {}) {
     quick ? 3 : 6,
   );
 
+  // 教程向检索。通用词按 pubdate 召回的是资讯，教程必须用「工具名 + 动作」
+  // 单独去捞。quick 模式（Worker 边缘实时）也保留 6 个，否则实时通道里
+  // 教程供给会断档，只能等每小时的 Actions 快照补。
+  const tutorialKeywords = TUTORIAL_KEYWORDS.slice(0, quick ? 6 : TUTORIAL_KEYWORDS.length);
+
   const tasks = [
     ...keywords.map((kw) => () => biliSearch(kw, cookie).then((r) => track('bili_search', r))),
+    ...tutorialKeywords.map(
+      (kw) => () => biliSearch(kw, cookie).then((r) => track('bili_tutorial', r)),
+    ),
     ...(quick ? [] : BILI_ZONES).map(
       (z) => () => biliZone(z, cookie).then((r) => track('bili_zone', r)),
     ),
@@ -404,7 +454,11 @@ const HOUR = 3600;
  */
 function score(item, now) {
   const ageHours = Math.max(0, (now - item.publishedTs) / HOUR);
-  const freshness = Math.exp(-ageHours / 36);
+  // 教程的保质期远长于新闻：一条「Ollama 本地部署」三天后依然有用，
+  // 而「某公司今日发布」隔天就废。用 36h 的统一衰减去压教程，
+  // 等于强迫它跟资讯拼时效 —— 那是它必输的赛道。放宽到 84h。
+  const halfLife = item.isTutorial ? 84 : 36;
+  const freshness = Math.exp(-ageHours / halfLife);
 
   // 媒体文章没有播放量，若按视频口径算热度会被系统性压到底部。
   // 它们的价值在时效与信源本身，因此给一个由信源权重决定的基础热度。
@@ -422,6 +476,10 @@ function score(item, now) {
   if (item.noise === 1) modifier *= 0.55; // 软噪音：资源分发、标题党
   if (item.relevance >= 2) modifier *= 1.12; // 标题强信号
   if (item.tier === 'neutral') modifier *= 0.75; // 中性分区可信度较低
+  // 教程供给天然稀缺（资讯有 RSS 批量灌入，教程只能靠搜索一条条捞），
+  // 不给一点扶持就会被资讯洪流冲到 200 名开外。1.18 是实测下来
+  // 既能让教程进首屏、又不至于挤掉当天重大发布的平衡点。
+  if (item.isTutorial) modifier *= 1.18;
   modifier *= 1 + Math.min(item.hits - 1, 3) * 0.08; // 多入口命中说明确实在被讨论
 
   return (freshness * 6 + heat * 0.9) * modifier;
@@ -449,6 +507,32 @@ function diversify(list, { window = 6, maxPerWindow = 3 } = {}) {
     out.push(pending.splice(pick, 1)[0]);
   }
   return out;
+}
+
+/**
+ * 教程配额。
+ *
+ * 加了 26 个教程向搜索词之后，教程原始召回涨到 560 条，加上排序里的
+ * 1.18 倍加成和更慢的时间衰减，实测已经占到最终列表的 47%。
+ * 再放任下去，这个站会从「AI 情报台」漂移成「AI 教程站」——
+ * 用户来这里的第一诉求仍然是「今天 AI 圈发生了什么」。
+ *
+ * 所以设一个上限：教程最多占 ratio。超出的部分按分数从低到高截掉，
+ * 腾出的位置让给后面分数最高的非教程内容。这不是压制教程，
+ * 而是保证任何一类内容都无法独占版面 —— 与 diversify 的平台约束同理。
+ */
+function capTutorials(list, limit, ratio = 0.42) {
+  const quota = Math.floor(limit * ratio);
+  const tutorials = [];
+  const others = [];
+  for (const it of list) (it.isTutorial ? tutorials : others).push(it);
+  if (tutorials.length <= quota) return list.slice(0, limit);
+
+  // 两边各自已按分数降序，取教程前 quota 条后归并回全局分数序
+  const kept = [...tutorials.slice(0, quota), ...others].sort(
+    (a, b) => (b.score || 0) - (a.score || 0),
+  );
+  return kept.slice(0, limit);
 }
 
 /**
@@ -544,10 +628,11 @@ export function refine(items, { maxAgeDays = 21, limit = 300 } = {}) {
     if (titleKey.length >= 10) titleIndex.set(titleKey, entry);
   }
 
-  const ranked = [...seen.values()]
+  const scored = [...seen.values()]
     .map((item) => ({ ...item, score: Number(score(item, now).toFixed(3)) }))
-    .sort((a, b) => b.score - a.score)
-    .slice(0, limit);
+    .sort((a, b) => b.score - a.score);
+  // 先卡教程配额再截断，否则被挤掉的位置会浪费在已经超额的教程上
+  const ranked = capTutorials(scored, limit);
 
   const list = diversify(ranked)
     // 内部判定字段不下发，省流量也免得前端误用

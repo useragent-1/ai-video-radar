@@ -52,6 +52,14 @@ export function Entry({ item }: { item: VideoItem }) {
         {item.description && <p className="entry__desc">{item.description}</p>}
 
         <div className="entry__meta">
+          {/*
+            教程标记放在主题标签之前。扫读时「这条能不能照着做」比
+            「这条属于哪个主题」更能决定要不要点进去，所以它该先被看到。
+            主题已是教程实操时就不重复挂了，同一件事说两遍是噪音。
+          */}
+          {item.isTutorial && item.topic !== 'tutorial' && (
+            <span className="tag tag--tutorial">教程</span>
+          )}
           <span className="tag tag--topic">{item.topicLabel}</span>
           <span className="tag tag--platform" data-kind={item.kind}>
             {item.platformName}

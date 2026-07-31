@@ -12,6 +12,9 @@ interface Props {
   onPlatform: (id: string) => void;
   kind: KindFilter;
   onKind: (v: KindFilter) => void;
+  tutorialOnly: boolean;
+  onTutorialOnly: (v: boolean) => void;
+  tutorialCount: number;
   sort: SortMode;
   onSort: (v: SortMode) => void;
   timeWindow: WindowMode;
@@ -86,6 +89,25 @@ export function Controls(p: Props) {
           </button>
         ))}
       </div>
+
+      {/*
+        教程是横切筛选而非第四种 kind，所以做成独立开关而不是塞进分段器里。
+        带上计数是刻意的：让人一眼知道「点进去有多少东西」，
+        而不是点了才发现只有三条。
+      */}
+      <button
+        className="toggle-tutorial"
+        aria-pressed={p.tutorialOnly}
+        onClick={() => p.onTutorialOnly(!p.tutorialOnly)}
+        title="只看可以照着做的教学内容"
+      >
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+          <path d="M12 6.5 3 4v14l9 2.5 9-2.5V4z" />
+          <path d="M12 6.5v14" />
+        </svg>
+        教程
+        <span className="chip__count">{p.tutorialCount}</span>
+      </button>
 
       <div className="seg" role="group" aria-label="排序方式">
         {SORTS.map((s) => (

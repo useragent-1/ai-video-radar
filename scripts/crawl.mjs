@@ -36,6 +36,9 @@ function summarize(items) {
   return {
     total: items.length,
     freshLast24h: items.filter((i) => new Date(i.publishedAt).getTime() > dayAgo).length,
+    // 教程供给单独计数：它靠搜索一条条捞，最容易在上游改接口时悄悄断掉，
+    // 而总量看不出来（资讯会自动填满 300 的坑）。有这个数才能及时发现。
+    tutorials: items.filter((i) => i.isTutorial).length,
     byPlatform,
     byTopic,
     byKind,

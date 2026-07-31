@@ -21,6 +21,8 @@ export interface VideoItem {
   description: string;
   topic: string;
   topicLabel: string;
+  /** 可动手复现的教学内容。与 topic 正交 —— AIGC 里也有教程 */
+  isTutorial?: boolean;
   channel: string;
   via: string;
   score: number;
@@ -64,6 +66,8 @@ export interface FeedMeta {
     byPlatform: Record<string, number>;
     byTopic: Record<string, number>;
     byKind?: Record<string, number>;
+    /** 教程内容总量，用于在筛选器上直接标数 */
+    tutorials?: number;
   };
   walled?: WalledPlatform[];
   note?: string;
@@ -77,4 +81,8 @@ export interface Feed {
 
 export type SortMode = 'smart' | 'latest' | 'hot';
 export type WindowMode = '24h' | '72h' | '7d' | 'all';
+/**
+ * 「教程」是横切筛选，不是第四种 kind —— 它可以和视频/资讯任意组合。
+ * 单独一个开关比塞进 KindFilter 更诚实，也不会让用户以为教程不是视频。
+ */
 export type KindFilter = 'all' | 'video' | 'article';
